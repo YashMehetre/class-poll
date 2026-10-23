@@ -1,0 +1,3 @@
+# Secrets and installed packages never go to git.
+.env
+node_modules/

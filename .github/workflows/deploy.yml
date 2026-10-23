@@ -1,0 +1,51 @@
+# Every push to main: check the code, then (only if the check passed) update the server.
+name: Check and deploy
+
+on:
+  push:
+    branches: [main]
+
+# One deploy at a time; a second push waits its turn.
+concurrency: deploy
+
+jobs:
+  # The gate. If this is red, nothing below runs and the server is untouched.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # Catches syntax errors before they reach the server.
+      - run: node --check app.js && node --check server.js && node --check questions.js
+
+  # The conveyor belt.
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+    steps:
+      - name: Log in to the server and run deploy.sh
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          # A key pasted from Windows can carry invisible carriage returns, which make
+          # ssh say "error in libcrypto". Strip them, then prove the key is readable.
+          printf '%s\n' "$VM_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key "$VM_USER@$VM_HOST" 'bash ~/class-poll/deploy.sh'
+
+      - name: Check the live site answers
+        run: |
+          for i in 1 2 3 4 5 6; do
+            curl -fsS "http://$VM_HOST:3000/api/health" && exit 0
+            sleep 5
+          done
+          echo "The site did not become healthy" && exit 1

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Poll</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-800">
+    <main class="mx-auto max-w-xl px-4 py-8">
+        <h1 class="mb-6 text-2xl font-bold">Class Poll</h1>
+        <div id="app" class="rounded-xl bg-white p-6 shadow">Loading...</div>
+    </main>
+
+    <script>
+        const app = document.getElementById("app");
+        // Answers stay in this array, in the browser, until the very last Submit.
+        // Refreshing the page mid-poll loses them: nothing is saved halfway.
+        let questions = [];
+        let answers = [];
+        let current = 0;
+
+        async function start() {
+            if (localStorage.getItem("pollSubmitted")) return showThanks();
+            try {
+                const res = await fetch("/api/questions");
+                questions = await res.json();
+                render();
+            } catch (e) {
+                app.textContent = "Could not load the questions. Try refreshing.";
+            }
+        }
+
+        function render() {
+            const q = questions[current];
+            const last = current === questions.length - 1;
+            app.innerHTML = `
+                <p class="mb-1 text-sm text-slate-500">Question ${current + 1} of ${questions.length}</p>
+                <div class="mb-4 h-2 rounded bg-slate-200">
+                    <div class="h-2 rounded bg-indigo-600" style="width:${((current + 1) / questions.length) * 100}%"></div>
+                </div>
+                <h2 class="mb-4 text-lg font-semibold"></h2>
+                <div id="options" class="space-y-2"></div>
+                <button id="next" class="mt-6 w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-40">
+                    ${last ? "Submit" : "Next"}
+                </button>
+                <p id="error" class="mt-3 text-sm text-red-600"></p>`;
+            // textContent, not innerHTML: question text is data, never markup.
+            app.querySelector("h2").textContent = q.text;
+            const box = document.getElementById("options");
+            q.options.forEach((text, i) => {
+                const b = document.createElement("button");
+                b.textContent = text;
+                b.className = "w-full rounded-lg border px-4 py-3 text-left " +
+                    (answers[current] === i
+                        ? "border-indigo-600 bg-indigo-50 font-semibold"
+                        : "border-slate-300 hover:bg-slate-50");
+                b.onclick = () => { answers[current] = i; render(); };
+                box.appendChild(b);
+            });
+            const next = document.getElementById("next");
+            next.disabled = answers[current] === undefined;
+            next.onclick = last ? submit : () => { current++; render(); };
+        }
+
+        async function submit() {
+            const next = document.getElementById("next");
+            next.disabled = true;
+            next.textContent = "Sending...";
+            try {
+                const res = await fetch("/api/responses", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ answers }),
+                });
+                if (!res.ok) throw new Error();
+                // A soft guard against accidental double submits. A determined person
+                // can clear it, so this is politeness, not security.
+                localStorage.setItem("pollSubmitted", "1");
+                showThanks();
+            } catch (e) {
+                next.disabled = false;
+                next.textContent = "Submit";
+                document.getElementById("error").textContent = "Could not send. Please try again.";
+            }
+        }
+
+        function showThanks() {
+            app.innerHTML = `
+                <h2 class="mb-2 text-lg font-semibold">Thanks, your answers are in.</h2>
+                <p class="text-slate-600">You can close this page.</p>
+                <button id="again" class="mt-6 text-sm text-slate-400 underline">Answer again (testing)</button>`;
+            document.getElementById("again").onclick = () => {
+                localStorage.removeItem("pollSubmitted");
+                answers = []; current = 0;
+                start();
+            };
+        }
+
+        start();
+    </script>
+</body>
+</html>
